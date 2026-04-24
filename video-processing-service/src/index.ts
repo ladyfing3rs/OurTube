@@ -1,32 +1,59 @@
 import express from "express";
-import ffmpeg from "fluent-ffmpeg";
+
+import {
+	uploadProcessedVideo,
+	downloadRawVideo,
+	deleteRawVideo,
+	deleteProcessedVideo,
+	convertVideo,
+	setupDirectories
+} from './storage';
+
+setupDirectories();
 
 const app = express();
 app.use(express.json());
 
 app.post("/process-video", (req, res) => {
 	// Get the path of the input vid file
-	const inputFilePath = req.body.inputFilePath;
-	const outputFilePath = req.body.outputFilePath;
-
-	if(!inputFilePath || !outputFilePath) {
-		return res.status(400).send("Bad Request: Missing File path.");
+	let data;
+	try{
+		const message = Buffer.from(req.body.message.data, 'base64').toString('utf8');
+		data = JSON.parse(message);
+		if(!data.name){
+			throw new Error('Invalid message payload received');
+		}
+	} catch(erro){
+		console.error(error);
+		return res.status(400).send('Bad Request: missing filename.');
 	}
 
-	ffmpeg(inputFilePath)
-		.outputOptions("-vf", "scale=-2:360") //360p
-		.on("end", () => {
-			return res.status(200).send("Video Processing DONE.")
-		})
-		.on("error", (err) => {
-			console.log(`An error occurred: ${err.message}`);
-			res.status(500).send(`Internal Server Error: ${err.message}`);
-		})
-		.save(outputFilePath);
+	const inputFilePath = data.name;
+	const outputFilePath = `processed-${inputFileName}`;
 
+	await downloadRawVideo(inputFileName);
+
+	try{
+		await convertVideo(inputFileName, outputFileName)
+	} catch(err){
+		await Promise.all([
+			deleteRawVideo(inputFileName),
+			deleteProcessedVideo(outputFileName)
+		]);
+		return res.status(500).send('Processing failed');
+	}
+	
+	await uploadProcessedVideo(outputFileName);
+
+	await Promise.all([
+		deleteRawVideo(inputFileName),
+		deleteProcessedVideo(outputFileName)
+	]);
+	
+	return res.status(200).send('Success');
 });
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-	console.log(`Video processing service listening at http://localhost:${port}`);
+	console.log(`Server is running on port ${port}`);
 });
